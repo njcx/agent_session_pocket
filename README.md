@@ -19,13 +19,26 @@ source ~/.zshrc   # 或 ~/.bashrc；新开终端自动生效
 
 ### 强制依赖
 
-安装脚本会强制检查以下依赖，缺失则中止安装：
+安装脚本会强制检查以下依赖，缺失则中止安装（脚本会打印对应平台的安装命令）：
 
 | 依赖 | 用途 | 安装方式 |
 |---|---|---|
+| jq | 解析 session id、hook 输入 | macOS: `brew install jq`；Linux: `sudo apt install jq` |
+| sqlite3 | 读写 opencode 2.0 会话库 | macOS: `brew install sqlite3`；Linux: `sudo apt install sqlite3` |
+| python3 | settings.json 的 hook 注册 | macOS: `brew install python3`；Linux: `sudo apt install python3` |
 | uv | Python 工具管理 | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | session-migrate | 跨 agent 会话迁移 | 由脚本自动执行 `uv tool install session-migrate` |
-| jq（建议） | 解析 session id | `brew install jq` |
+
+一条命令装齐基础依赖：
+
+```bash
+# macOS
+brew install jq sqlite3 python3
+# Debian/Ubuntu
+sudo apt install jq sqlite3 python3
+# Fedora/RHEL
+sudo dnf install jq sqlite3 python3
+```
 
 ## 安装了什么
 

@@ -498,10 +498,20 @@ _ase_json_field() {
 }
 
 # <tag> <id>：该 agent 原生会话目录里是否已有此会话
+# <tag> <id> <cwd>：该 agent 原生会话存储里是否已有此会话
+# 注意 claude 按目录（project）隔离，只查当前 cwd 对应的项目目录
 _ase_native_has() {
-  _t="$1"; _i="$2"
+  _t="$1"; _i="$2"; _c="${3:-$PWD}"
   case "$_t" in
-    claude)   [ -n "$(find "$HOME/.claude/projects" -name "$_i.jsonl" 2>/dev/null | head -n 1)" ] ;;
+    claude)
+      _enc=$(printf '%s' "$_c" | sed 's/[^A-Za-z0-9]/-/g')
+      _d="$HOME/.claude/projects/$_enc"
+      if [ -d "$_d" ]; then
+        [ -f "$_d/$_i.jsonl" ]
+      else
+        # 项目目录不存在 → 本 cwd 下不可能有该会话
+        return 1
+      fi ;;
     codex)    [ -n "$(find "$HOME/.codex/sessions" -name "*$_i*" 2>/dev/null | head -n 1)" ] ;;
     pi)       [ -n "$(find "$HOME/.pi" -name "*$_i*" 2>/dev/null | head -n 1)" ] ;;
     opencode)
@@ -575,7 +585,7 @@ _ase_ensure_native() {
 
   if [ -n "$_src" ]; then
     _sid=$(_ase_latest_id "$_tag" "$_cwd" 2>/dev/null || true)
-    if [ -n "$_sid" ] && _ase_native_has "$_tag" "$_sid"; then
+    if [ -n "$_sid" ] && _ase_native_has "$_tag" "$_sid" "$_cwd"; then
       printf '%s' "$_sid"
       return 0
     fi
