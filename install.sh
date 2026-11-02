@@ -645,6 +645,11 @@ echo "    - 没有? 自动用 session-migrate 从其他 agent 迁移"
 echo "    - 退出后自动导出到 \$PWD/.session/"
 echo "  ASE_FRESH=1 codex-s       # 强制新开，不 resume、不迁移"
 echo
+echo "Agent CLI 未安装的话:"
+echo "  npm install -g @anthropic-ai/claude-code"
+echo "  npm install -g @openai/codex"
+echo "  npm install -g --ignore-scripts @earendil-works/pi-coding-agent"
+echo
 echo "✔ 安装成功，祝使用愉快！"
 
 

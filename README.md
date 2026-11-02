@@ -39,6 +39,16 @@ sudo apt install jq python3
 sudo dnf install jq python3
 ```
 
+### Agent CLI 安装（本工具的包装对象）
+
+三个 agent CLI 需已安装且登录（`claude` / `codex` / `pi` 命令可用）。npm 全局安装：
+
+```bash
+npm install -g @anthropic-ai/claude-code
+npm install -g @openai/codex
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+```
+
 ## 安装了什么
 
 | 路径 | 内容 |
