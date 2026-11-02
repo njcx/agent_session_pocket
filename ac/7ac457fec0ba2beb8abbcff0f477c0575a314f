@@ -1,0 +1,14 @@
+install.sh
+  h_df2ebcf7615d4f 724
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ac7ac457fec0ba2beb8abbcff0f477c0575a314f",
+  "prompts": {},
+  "humans": {
+    "h_df2ebcf7615d4f": {
+      "author": "njcx <njcx86@gmail.com>"
+    }
+  }
+}
