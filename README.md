@@ -1,11 +1,11 @@
 # agent-session-export
 
-一套跨 AI 编程助手（Claude Code / Codex / Pi / OpenCode）的**会话导出 + 自动恢复 + 跨 agent 迁移**工具，由一个 `install.sh` 完成全部安装。
+一套跨 AI 编程助手（Claude Code / Codex CLI / Pi）的**会话导出 + 自动恢复 + 跨 agent 迁移**工具，由一个 `install.sh` 完成全部安装。
 
 ## 功能
 
 - **会话导出**：每个 agent 会话结束后，自动把会话文件导出到当前目录的 `.session/` 下
-- **自动 resume**：`claude-s` / `codex-s` / `pi-s` / `opencode-s` 启动时，若 `.session/` 里有本 agent 的会话，自动带着历史 resume
+- **自动 resume**：`claude-s` / `codex-s` / `pi-s` 启动时，若 `.session/` 里有本 agent 的会话，自动带着历史 resume
 - **跨 agent 迁移**：本 agent 没有会话时，自动用 [session-migrate](https://github.com/xhluca/session-migrate) 从其他 agent 的最新会话迁移过来
 - **去重导出**：源会话内容未变化时跳过导出，不产生重复文件
 - **Git 分享**：`.session/` 跟随仓库提交——一次 commit 同时留下代码和产生这些代码的完整对话
@@ -24,7 +24,6 @@ source ~/.zshrc   # 或 ~/.bashrc；新开终端自动生效
 | 依赖 | 用途 | 安装方式 |
 |---|---|---|
 | jq | 解析 session id、hook 输入 | macOS: `brew install jq`；Linux: `sudo apt install jq` |
-| sqlite3 | 读写 opencode 2.0 会话库 | macOS: `brew install sqlite3`；Linux: `sudo apt install sqlite3` |
 | python3 | settings.json 的 hook 注册 | macOS: `brew install python3`；Linux: `sudo apt install python3` |
 | uv | Python 工具管理 | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | session-migrate | 跨 agent 会话迁移 | 由脚本自动执行 `uv tool install session-migrate` |
@@ -33,11 +32,11 @@ source ~/.zshrc   # 或 ~/.bashrc；新开终端自动生效
 
 ```bash
 # macOS
-brew install jq sqlite3 python3
+brew install jq python3
 # Debian/Ubuntu
-sudo apt install jq sqlite3 python3
+sudo apt install jq python3
 # Fedora/RHEL
-sudo dnf install jq sqlite3 python3
+sudo dnf install jq python3
 ```
 
 ## 安装了什么
@@ -47,7 +46,7 @@ sudo dnf install jq sqlite3 python3
 | `~/.local/bin/agent-session-export` | 主脚本：手动/自动导出会话 |
 | `~/.claude/hooks/export-session-to-project.sh` | Claude SessionEnd 钩子 |
 | `~/.claude/settings.json` | 注册 SessionEnd hook |
-| `~/.bashrc` / `~/.zshrc` | `claude-s` 等四个 shell 函数 |
+| `~/.bashrc` / `~/.zshrc` | `claude-s` 等三个 shell 函数 |
 
 ## 使用
 
@@ -57,7 +56,6 @@ sudo dnf install jq sqlite3 python3
 claude-s          # 有 .session/claude 会话 → 自动 resume；没有 → 新开
 codex-s           # 同上，支持从其他 agent 迁移
 pi-s              # 同上
-opencode-s        # 同上
 ```
 
 启动时的完整决策流程（以 `pi-s` 为例）：
@@ -69,7 +67,7 @@ opencode-s        # 同上
 有 .session/，且原生会话目录里已有本 agent 会话
   └→ 直接 resume
 
-有 .session/ 的本 agent 文件，但原生会话目录里没有（新机器/新 agent）
+有 .session/ 的本 agent 文件，但原生目录里没有（新机器/新 agent）
   └→ smigrate import 导入原生会话目录 → 用新 session id resume
 
 没有本 agent 的会话，但有其他 agent 的会话
@@ -105,14 +103,10 @@ agent-session-export auto "$PWD"               # 导出全部
 ├── latest-claude.jsonl                       # 各 agent 最新会话（原生格式）
 ├── latest-codex.jsonl
 ├── latest-pi.jsonl
-├── latest-opencode.id                        # opencode 2.0：session id（ses_ 开头）
-├── latest-opencode.db                        # opencode 2.0：SQLite 库快照
-├── latest-opencode.export.json               # opencode：可迁移的官方导出 bundle
 └── 20261102-144935-claude-<session-id>.jsonl # 时间戳历史版本
 ```
 
-- claude / codex / pi：导出**原生会话文件**（与各 agent 自身存储格式一致）
-- opencode 2.0：会话存在 SQLite（`opencode.db`），故导出 id + 库快照 + 官方 export bundle 三件套
+三个 agent 均导出**原生会话文件**（与各 agent 自身存储格式一致），可直接被 session-migrate 识别为迁移源。
 
 ## Git 分享：代码 + 对话一起提交
 
@@ -141,8 +135,6 @@ claude-s        # 自动 resume 仓库里携带的会话，接着你的上下文
 ```gitignore
 # 只保留各 agent 最新一份，不提交时间戳历史
 .session/*-20*
-# opencode 的 SQLite 快照较大（几十 MB），按需忽略
-.session/latest-opencode.db
 ```
 
 或反过来只跟踪 `latest-*`（推荐，历史进本地就够）：
@@ -152,40 +144,28 @@ claude-s        # 自动 resume 仓库里携带的会话，接着你的上下文
 !.session/latest-claude.jsonl
 !.session/latest-codex.jsonl
 !.session/latest-pi.jsonl
-!.session/latest-opencode.id
-!.session/latest-opencode.export.json
 ```
 
 ### 注意
 
 - `.session/` 里的对话是**明文**，包含你与 AI 的全部交互（提示词、代码、命令输出）。公开仓库提交前先确认没有敏感信息（密钥、内部地址等）
-- `latest-*.id` / `export.json` 体积小适合提交；`latest-opencode.db` 是整库快照，大且含全部历史会话，公开仓库建议忽略
+- `latest-*.jsonl` 体积小，适合提交
 
 ## 跨 agent 迁移矩阵
 
-四个 agent 互迁全部支持，源文件质量（消息保留度）：
+三个 agent 互迁全部支持，源文件质量（消息保留度）：
 
-| 源 \ 目标 | claude | codex | pi | opencode |
-|---|---|---|---|---|
-| **claude** | ✅ | ✅ | ✅ | ✅ |
-| **codex** | ✅ | ✅ | ✅ | ✅ |
-| **pi** | ✅ | ✅ | ✅ | ✅ |
-| **opencode** | ✅ | ✅ | ✅ | ✅ |
+| 源 \ 目标 | claude | codex | pi |
+|---|---|---|---|
+| **claude** | ✅ | ✅ | ✅ |
+| **codex** | ✅ | ✅ | ✅ |
+| **pi** | ✅ | ✅ | ✅ |
 
 说明：
 
 - 用户/助手消息、工具调用在各条链路均保留
-- 各 agent 特有的元数据（title、thinking 等级、model variant）会按 smigrate 规则丢弃，无消息损失
+- 各 agent 特有的元数据（title、thinking 等级等）会按 smigrate 规则丢弃，无消息损失
 - provider 绑定的 thinking 痕迹不可迁移（所有工具的限制）
-
-### opencode 特殊通道
-
-smigrate 的 `import --to opencode` 有 CLI 版本硬检查（只验证 2.0.x），遇到更新的 opencode CLI 会被拒。脚本自动改走双阶段通道：
-
-```
-smigrate convert <源> --to opencode --output <bundle> --target-cli-version 2.0.22
-opencode session import <bundle> --directory "$PWD"     # 官方导入命令，无版本限制
-```
 
 ## 卸载
 
@@ -204,8 +184,8 @@ rm -f ~/.claude/hooks/export-session-to-project.sh
 **Q: 为什么退出 pi 后没有生成 `.session/latest-pi.jsonl`？**
 去重逻辑：会话内容与上次导出一致时跳过（输出 `skip: pi session unchanged`）。
 
-**Q: `opencode-s` 提示 `session import failed`？**
-确认 opencode CLI 可用（`opencode --version`），以及 `opencode session import` 子命令存在（2.x 版本）。
-
 **Q: TUI 程序误吞了我的键盘输入？**
 旧版本存在 `||` 降级链导致 TUI 异常退出后连环重启的问题，现版本已改为"启动前探测参数、只启动一次"，如仍出现请反馈。
+
+**Q: Ctrl+C 退出后导出被中断？**
+wrapper 在 TUI 退出后的导出阶段屏蔽了 SIGINT，正常情况 Ctrl+C 不会影响导出。

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install-agent-session-export.sh
 # 清理旧版 → 安装 agent-session-export + Claude SessionEnd
-# + claude-s/codex-s/pi-s/opencode-s（有 .session 则启动 resume，退出导出）
+# + claude-s/codex-s/pi-s（有 .session 则启动 resume，退出导出）
 # 兼容 Linux / macOS
 set -euo pipefail
 
@@ -18,11 +18,11 @@ echo "==> OS: $(uname -s)  bash: ${BASH_VERSION:-unknown}"
 echo "==> prefix: $PREFIX"
 
 # ---------------------------------------------------------------------------
-# 前置) 强制依赖检查：jq / sqlite3 / python3，缺失即中止
+# 前置) 强制依赖检查：jq / python3，缺失即中止
 # ---------------------------------------------------------------------------
 _OS="$(uname -s)"
 _missing=""
-for _dep in jq sqlite3 python3; do
+for _dep in jq python3; do
   if ! command -v "$_dep" >/dev/null 2>&1; then
     _missing="$_missing $_dep"
   fi
@@ -32,14 +32,14 @@ if [ -n "$_missing" ]; then
   echo "    请先安装后重试:" >&2
   case "$_OS" in
     Darwin)
-      echo "      brew install jq sqlite3 python3" >&2 ;;
+      echo "      brew install jq python3" >&2 ;;
     *)
-      echo "      sudo apt install jq sqlite3 python3    # Debian/Ubuntu" >&2
-      echo "      sudo dnf install jq sqlite3 python3    # Fedora/RHEL" >&2 ;;
+      echo "      sudo apt install jq python3    # Debian/Ubuntu" >&2
+      echo "      sudo dnf install jq python3    # Fedora/RHEL" >&2 ;;
   esac
   exit 1
 fi
-echo "==> deps OK: jq / sqlite3 / python3"
+echo "==> deps OK: jq / python3"
 
 # ---------------------------------------------------------------------------
 # 0) 清理旧安装
@@ -146,7 +146,7 @@ mkdir -p "$BIN_DIR" "$HOOK_DIR" "$(dirname "$SETTINGS")"
 
 cat > "$BIN" << 'SCRIPT'
 #!/usr/bin/env bash
-# agent-session-export — Claude / Codex / Pi / OpenCode → $cwd/.session/
+# agent-session-export — Claude / Codex / Pi → $cwd/.session/
 set -euo pipefail
 
 agent="${1:-auto}"
@@ -282,84 +282,20 @@ export_pi() {
   [ -n "$_src" ] && copy_one "$_src" "$_cwd/.session" "pi" ""
 }
 
-export_opencode() {
-  _key="${1:-}"
-  _cwd="${2:-$PWD}"
-  _dest_dir="$_cwd/.session"
-  _db="$HOME/.local/share/opencode/opencode.db"
-
-  # 有 key 时：key 可能是 ses_ 开头的 session id
-  if [ -n "$_key" ] && [ -f "$(expand "$_key")" ]; then
-    copy_one "$(expand "$_key")" "$_dest_dir" "opencode" ""
-    return 0
-  fi
-
-  # opencode 2.0：会话在 SQLite。sqlite3 可用时记录最新会话 id + db 快照
-  if [ -f "$_db" ] && command -v sqlite3 >/dev/null 2>&1; then
-    _sid=$(sqlite3 "$_db" "SELECT id FROM session ORDER BY time_updated DESC LIMIT 1" 2>/dev/null || true)
-    if [ -n "$_sid" ]; then
-      mkdir -p "$_dest_dir"
-      # 快照变化检测：db 表结构不变时 session 数量即可代表
-      _cnt=$(sqlite3 "$_db" "SELECT COUNT(*) FROM session" 2>/dev/null || echo 0)
-      _prev=""
-      [ -f "$_dest_dir/latest-opencode.id" ] && _prev=$(cat "$_dest_dir/latest-opencode.id" 2>/dev/null || true)
-      if [ "$_sid" != "$_prev" ]; then
-        printf '%s' "$_sid" > "$_dest_dir/latest-opencode.id"
-        cp "$_db" "$_dest_dir/latest-opencode.db"
-        # 生成可迁移的导出 bundle（opencode session export 的 JSON 可被
-        # smigrate convert 作为源），供其他 agent 的 xxx-s 迁移用
-        if command -v opencode >/dev/null 2>&1; then
-          if opencode session export "$_sid" > "$_dest_dir/latest-opencode.export.json" 2>/dev/null; then
-            _ts=$(date +%Y%m%d-%H%M%S)
-            cp "$_dest_dir/latest-opencode.export.json" \
-               "$_dest_dir/${_ts}-opencode-$_sid.export.json"
-            echo "exported: $_dest_dir/${_ts}-opencode-$_sid.export.json"
-          else
-            rm -f "$_dest_dir/latest-opencode.export.json"
-          fi
-        fi
-        echo "exported: $_dest_dir/latest-opencode.id ($_sid, sessions: $_cnt)"
-      fi
-      return 0
-    fi
-  fi
-
-  # 兜底：老版本文件布局。只认 storage 下的会话文件，
-  # 排除 service.json / 日志 / 缓存等状态文件
-  _src=""
-  for _r in "$HOME/.local/share/opencode/storage" "$HOME/.opencode/storage" "$HOME/.config/opencode/storage"; do
-    [ -d "$_r" ] || continue
-    if [ -n "$_key" ]; then
-      _src=$(find "$_r" -type f -name "*${_key}*" 2>/dev/null | head -n 1 || true)
-    else
-      # 会话文件名含 ses_ 前缀或 UUID 形态；session_diff 的空 [] 也排除
-      _src=$(find "$_r" -type f \( -name "ses_*" -o -name "*-*-*-*-*" \) \( -name "*.json" -o -name "*.jsonl" \) 2>/dev/null | xargs ls -t 2>/dev/null | head -n 1 || true)
-    fi
-    [ -n "$_src" ] && break
-  done
-  # 文件存在但内容为空数组（非会话）则放弃
-  if [ -n "$_src" ] && [ "$(wc -c < "$_src" 2>/dev/null || echo 0)" -le 10 ]; then
-    _src=""
-  fi
-  [ -n "$_src" ] && copy_one "$_src" "$_dest_dir" "opencode" ""
-}
-
 export_auto() {
   _cwd="${1:-$PWD}"
   export_claude "" "" "$_cwd" || true
   export_codex "" "$_cwd" || true
   export_pi "" "$_cwd" || true
-  export_opencode "" "$_cwd" || true
 }
 
 case "$agent" in
   claude)   export_claude "${2:-}" "${3:-}" "${4:-$PWD}" ;;
   codex)    export_codex "${2:-}" "${3:-$PWD}" ;;
   pi)       export_pi "${2:-}" "${3:-$PWD}" ;;
-  opencode) export_opencode "${2:-}" "${3:-$PWD}" ;;
   auto)     export_auto "${2:-$PWD}" ;;
   *)
-    echo "usage: agent-session-export {claude|codex|pi|opencode|auto} ..." >&2
+    echo "usage: agent-session-export {claude|codex|pi|auto} ..." >&2
     exit 1
     ;;
 esac
@@ -439,11 +375,6 @@ _ase_latest_id() {
   _tag="$1"
   _dir="${2:-$PWD}/.session"
   [ -d "$_dir" ] || return 1
-  # opencode 2.0：id 单独记录在 latest-opencode.id
-  if [ "$_tag" = "opencode" ] && [ -f "$_dir/latest-opencode.id" ]; then
-    _id=$(cat "$_dir/latest-opencode.id" 2>/dev/null || true)
-    [ -n "$_id" ] && printf '%s' "$_id" && return 0
-  fi
   _f=
   for _c in "$_dir/latest-${_tag}.jsonl" "$_dir/latest-${_tag}.json" "$_dir/latest-${_tag}.jsonl.zst"; do
     [ -f "$_c" ] && _f="$_c" && break
@@ -514,13 +445,6 @@ _ase_native_has() {
       fi ;;
     codex)    [ -n "$(find "$HOME/.codex/sessions" -name "*$_i*" 2>/dev/null | head -n 1)" ] ;;
     pi)       [ -n "$(find "$HOME/.pi" -name "*$_i*" 2>/dev/null | head -n 1)" ] ;;
-    opencode)
-      # 2.0：查 SQLite；老版本：查文件
-      if [ -f "$HOME/.local/share/opencode/opencode.db" ] && command -v sqlite3 >/dev/null 2>&1; then
-        [ -n "$(sqlite3 "$HOME/.local/share/opencode/opencode.db" "SELECT id FROM session WHERE id='$_i' LIMIT 1" 2>/dev/null)" ]
-      else
-        [ -n "$(find "$HOME/.local/share/opencode" -name "*$_i*" 2>/dev/null | head -n 1)" ]
-      fi ;;
     *) return 1 ;;
   esac
 }
@@ -545,30 +469,9 @@ _ase_ensure_native() {
   fi
 
   # 统一入口：选定源文件后导入目标 agent，stdout 输出新 session id
-  # opencode 特殊：smigrate import 会因 CLI 版本检查失败（只验证 2.0.x），
-  # 改用 convert 生成官方 bundle + opencode session import 导入（不检查版本）
   _ase_import_to() {
     _isrc="$1"
     _icwd="$2"
-    if [ "$_tag" = "opencode" ]; then
-      _bundle=$(mktemp "${TMPDIR:-/tmp}/oc-import.XXXXXX")
-      rm -f "$_bundle"   # convert 拒绝覆盖已存在文件，占位后删除
-      _cout=$("$_sm" convert "$_isrc" --to opencode --output "$_bundle" --target-cli-version 2.0.22 2>&1)
-      if [ $? -ne 0 ]; then
-        echo "[session-migrate] convert failed: $_cout" >&2
-        rm -f "$_bundle"
-        return 1
-      fi
-      _iout=$(opencode session import "$_bundle" --directory "$_icwd" 2>&1)
-      _iec=$?
-      rm -f "$_bundle"
-      if [ $_iec -ne 0 ] || ! printf '%s' "$_iout" | grep -q 'ses_'; then
-        echo "[opencode] session import failed: $_iout" >&2
-        return 1
-      fi
-      printf '%s' "$_iout" | sed -n 's/.*\(ses_[A-Za-z0-9]*\).*/\1/p' | head -n 1
-      return 0
-    fi
     _out=$("$_sm" import "$_isrc" --to "$_tag" --cwd "$_icwd" 2>&1)
     _ec=$?
     [ $_ec -ne 0 ] && echo "[session-migrate] import failed: $_out" >&2
@@ -606,9 +509,9 @@ _ase_ensure_native() {
 
   # 情况3：无该 tag → 其他 agent 最新文件迁移
   _osrc=""; _otag=""
-  for _t in claude codex pi opencode; do
+  for _t in claude codex pi; do
     [ "$_t" = "$_tag" ] && continue
-    for _f in "$_dir/latest-${_t}.jsonl" "$_dir/latest-${_t}.json" "$_dir/latest-${_t}.jsonl.zst" "$_dir/latest-${_t}.export.json"; do
+    for _f in "$_dir/latest-${_t}.jsonl" "$_dir/latest-${_t}.json" "$_dir/latest-${_t}.jsonl.zst"; do
       [ -f "$_f" ] || continue
       if [ -z "$_osrc" ] || [ "$_f" -nt "$_osrc" ]; then
         _osrc="$_f"
@@ -643,7 +546,9 @@ claude-s() {
       echo "[claude-s] resume: $_id"
       command claude --resume "$_id" "$@"
       _ec=$?
+      trap '' INT
       agent-session-export claude "" "" "$PWD" || true
+      trap - INT
       return $_ec
     fi
     # 迁移无可用会话；本机原生目录有历史才试 --continue，
@@ -653,13 +558,17 @@ claude-s() {
       echo "[claude-s] try --continue"
       command claude --continue "$@"
       _ec=$?
+      trap '' INT
       agent-session-export claude "" "" "$PWD" || true
+      trap - INT
       return $_ec
     fi
   fi
   command claude "$@"
   _ec=$?
+  trap '' INT
   agent-session-export claude "" "" "$PWD" || true
+  trap - INT
   return $_ec
 }
 
@@ -674,13 +583,17 @@ codex-s() {
         command codex --resume "$_id" "$@"
       fi
       _ec=$?
+      trap '' INT
       agent-session-export codex "" "$PWD" || true
+      trap - INT
       return $_ec
     fi
   fi
   command codex "$@"
   _ec=$?
+  trap '' INT
   agent-session-export codex "" "$PWD" || true
+  trap - INT
   return $_ec
 }
 
@@ -698,37 +611,17 @@ pi-s() {
         command pi "$@"
       fi
       _ec=$?
+      trap '' INT
       agent-session-export pi "" "$PWD" || true
+      trap - INT
       return $_ec
     fi
   fi
   command pi "$@"
   _ec=$?
+  trap '' INT
   agent-session-export pi "" "$PWD" || true
-  return $_ec
-}
-
-opencode-s() {
-  if ! _ase_user_handles_session "$@"; then
-    _id=$(_ase_ensure_native opencode "$PWD" || true)
-    if [ -n "${_id:-}" ]; then
-      echo "[opencode-s] resume: $_id"
-      # 先探测 opencode 支持的 resume 参数，只启动一次（TUI 不可 || 链式重试）
-      if command opencode --help 2>&1 | grep -q -- '--session'; then
-        command opencode --session "$_id" "$@"
-      elif command opencode run --help 2>&1 | grep -q -- '--session'; then
-        command opencode run --session "$_id" "$@"
-      else
-        command opencode "$@"
-      fi
-      _ec=$?
-      agent-session-export opencode "" "$PWD" || true
-      return $_ec
-    fi
-  fi
-  command opencode "$@"
-  _ec=$?
-  agent-session-export opencode "" "$PWD" || true
+  trap - INT
   return $_ec
 }
 FUNCS
@@ -746,7 +639,7 @@ echo "  source ~/.bashrc     # Linux bash"
 echo "  source ~/.zshrc      # macOS / zsh"
 echo
 echo "  session-snap              # 手动导出"
-echo "  claude-s | codex-s | pi-s | opencode-s"
+echo "  claude-s | codex-s | pi-s"
 echo "    - 有 .session/latest-* 则自动 resume"
 echo "    - 没有? 自动用 session-migrate 从其他 agent 迁移"
 echo "    - 退出后自动导出到 \$PWD/.session/"
