@@ -246,7 +246,11 @@ export_claude() {
   fi
   _transcript=$(expand "${_transcript:-}")
   if [ -n "$_transcript" ] && [ -f "$_transcript" ]; then
-    copy_one "$_transcript" "$_cwd/.session" "claude" "$_sid"
+    # ASE_SINCE 保护：SessionEnd hook 传来的 transcript 若早于基准
+    # （wrapper 启动前就存在的旧会话），不导出
+    if _since_ok "$_transcript"; then
+      copy_one "$_transcript" "$_cwd/.session" "claude" "$_sid"
+    fi
     return 0
   fi
   _enc=$(printf '%s' "$_cwd" | sed 's/[^A-Za-z0-9]/-/g')
@@ -326,10 +330,13 @@ chmod +x "$BIN"
 echo "==> installed $BIN"
 
 # ---------------------------------------------------------------------------
-# 2) Claude SessionEnd 包装
+# 2) Claude SessionEnd 包装（带 ASE_SINCE 基准共享，wrapper 空会话保护的一部分）
 # ---------------------------------------------------------------------------
 cat > "$HOOK_SH" << EOF
 #!/usr/bin/env bash
+# wrapper（claude-s）启动时会在固定路径放时间基准文件；
+# 存在则导出只认基准之后落盘的会话，防止空会话时旧会话顶替
+export ASE_SINCE="\${TMPDIR:-/tmp}/ase-claude-since"
 exec "$BIN" claude
 EOF
 chmod +x "$HOOK_SH"
@@ -414,6 +421,10 @@ _ase_latest_id() {
         if [ -z "$_id" ] || [ "$_id" = "null" ]; then
           _id=$(head -n 50 "$_f" 2>/dev/null | jq -r 'select(.type=="session_meta")|.payload.id // empty' 2>/dev/null | head -n 1)
         fi
+        # pi: 首行 type=session 的 id 在 .id
+        if [ -z "$_id" ] || [ "$_id" = "null" ]; then
+          _id=$(head -n 50 "$_f" 2>/dev/null | jq -r 'select(.type=="session")|.id // empty' 2>/dev/null | head -n 1)
+        fi
         if [ -n "$_id" ] && [ "$_id" != "null" ]; then
           printf '%s' "$_id"
           return 0
@@ -423,6 +434,11 @@ _ase_latest_id() {
       # codex: rollout-<ts>-<uuid> → 只要 uuid
       case "$_id" in
         rollout-*) _id=${_id#rollout-}; _id=${_id#*-*-*-*-*-} ;;
+      esac
+      # 文件名里没有有效 id（如 latest-pi 剥完只剩 tag 本身）→ 失败，
+      # 让调用方走迁移/新开，而不是 resume 一个字面量
+      case "$_id" in
+        ""|"$_tag") return 1 ;;
       esac
       printf '%s' "$_id"
       return 0
@@ -434,6 +450,15 @@ _ase_latest_id() {
         _id=${_id#rollout-}
         _id=${_id#*-*-*-*-*-}
       fi
+      # pi: 剩 <ts>Z_<uuid>（如 2026-11-02T09-17-18-944Z_01a19b8c-...），只要 uuid
+      if [ "$_tag" = "pi" ]; then
+        case "$_id" in
+          *Z_*) _id=${_id#*Z_} ;;
+        esac
+      fi
+      case "$_id" in
+        ""|"$_tag") return 1 ;;
+      esac
       printf '%s' "$_id"
       return 0
       ;;
@@ -562,9 +587,15 @@ _ase_user_handles_session() {
 }
 
 # TUI 启动前记录时间基准；导出时只认基准之后新建的会话文件，
-# 空会话（agent 没落盘新文件）不导出，避免旧会话顶替
+# 空会话（agent 没落盘新文件）不导出，避免旧会话顶替。
+# 基准写到固定路径（非 mktemp）：SessionEnd hook 是独立进程，
+# 也从这里读同一基准——hook 与 wrapper 共享同一份保护
+_ase_since_file="${TMPDIR:-/tmp}/ase-claude-since"
+
 _ase_mark() {
-  _ase_since_file=$(mktemp "${TMPDIR:-/tmp}/ase-since.XXXXXX")
+  # rm+重建（而非截断）：`: >` 不更新 mtime，基准必须是"现在"
+  rm -f "$_ase_since_file" 2>/dev/null
+  : > "$_ase_since_file" 2>/dev/null || true
 }
 
 _ase_export() {
@@ -573,7 +604,8 @@ _ase_export() {
   _ase_extra1="${3:-}"
   ASE_SINCE="$_ase_since_file" agent-session-export "$_ase_tag" "$_ase_extra1" "" "$_ase_cwd" 2>/dev/null || \
     ASE_SINCE="$_ase_since_file" agent-session-export "$_ase_tag" "" "$_ase_cwd" 2>/dev/null || true
-  rm -f "${_ase_since_file:-/nonexistent}" 2>/dev/null || true
+  # 不删基准：SessionEnd hook 可能晚于本函数触发，同样需要它；
+  # 下次 _ase_mark 会 rm+重建刷新时间
 }
 
 claude-s() {
@@ -694,6 +726,8 @@ echo "Agent CLI 未安装的话:"
 echo "  npm install -g @anthropic-ai/claude-code"
 echo "  npm install -g @openai/codex"
 echo "  npm install -g --ignore-scripts @earendil-works/pi-coding-agent"
+echo
+echo "已验证版本: claude-code 2.1.314 / codex 0.154.0 / pi 0.85.1"
 echo
 echo "✔ 安装成功，祝使用愉快！"
 

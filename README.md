@@ -49,6 +49,19 @@ npm install -g @openai/codex
 npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 ```
 
+### 已验证的版本组合
+
+| Agent | 版本 |
+|---|---|
+| Claude Code | 2.1.314 |
+| Codex CLI | 0.154.0 |
+| Pi | 0.85.1 |
+
+版本说明：
+
+- Claude Code / Codex：上述及邻近版本实测导出、resume、互迁正常
+- **Pi 0.85.1**：作为迁移**目标**正常（resume 无碍）；作为迁移**源**时，若会话中包含 bash 执行等新消息类型（`bashExecution` / `custom` / `branchSummary` / `compactionSummary` role），session-migrate 0.12.0 会报 `unsupported role` 拒绝迁移（其验证的 pi 版本为 0.80.6）——此时脚本降级为新开会话，数据不丢。纯对话会话可正常迁出
+
 ## 安装了什么
 
 | 路径 | 内容 |
