@@ -152,6 +152,15 @@ set -euo pipefail
 agent="${1:-auto}"
 ts=$(date +%Y%m%d-%H%M%S)
 
+# ASE_SINCE 指向一个参考文件：设置后，兜底导出只认比它新的会话文件。
+# 用于 wrapper 场景——TUI 启动前记录时间基准，空会话（无新文件）不导出，
+# 避免抓到旧的、有内容的会话覆盖 .session。
+_since_ok() {
+  [ -n "${ASE_SINCE:-}" ] || return 0
+  [ -f "$ASE_SINCE" ] || return 0
+  [ "$1" -nt "$ASE_SINCE" ]
+}
+
 expand() {
   _p="${1:-}"
   case "$_p" in
@@ -180,7 +189,14 @@ latest_file() {
     fi
   done
   [ -n "$_candidates" ] || return 0
-  printf '%s\n' "$_candidates" | xargs ls -t 2>/dev/null | head -n 1 || true
+  # ASE_SINCE 设置时只认基准之后新建的会话（wrapper 空会话保护）
+  if [ -n "${ASE_SINCE:-}" ] && [ -f "$ASE_SINCE" ]; then
+    printf '%s\n' "$_candidates" | xargs ls -t 2>/dev/null | while IFS= read -r _c; do
+      [ "$_c" -nt "$ASE_SINCE" ] && { printf '%s\n' "$_c"; break; }
+    done
+  else
+    printf '%s\n' "$_candidates" | xargs ls -t 2>/dev/null | head -n 1 || true
+  fi
 }
 
 copy_one() {
@@ -239,7 +255,13 @@ export_claude() {
     _dir=$(ls -dt "$HOME"/.claude/projects/* 2>/dev/null | head -n 1 || true)
   fi
   [ -n "${_dir:-}" ] && [ -d "$_dir" ] || return 0
-  _latest=$(ls -t "$_dir"/*.jsonl 2>/dev/null | head -n 1 || true)
+  # 只认本次 wrapper 启动后新建的会话文件；空会话（无新文件）不导出
+  _latest=""
+  for _f in $(ls -t "$_dir"/*.jsonl 2>/dev/null); do
+    _since_ok "$_f" || break
+    _latest="$_f"
+    break
+  done
   [ -n "$_latest" ] && copy_one "$_latest" "$_cwd/.session" "claude" "$(basename "$_latest" .jsonl)"
 }
 
@@ -539,7 +561,23 @@ _ase_user_handles_session() {
   return 1
 }
 
+# TUI 启动前记录时间基准；导出时只认基准之后新建的会话文件，
+# 空会话（agent 没落盘新文件）不导出，避免旧会话顶替
+_ase_mark() {
+  _ase_since_file=$(mktemp "${TMPDIR:-/tmp}/ase-since.XXXXXX")
+}
+
+_ase_export() {
+  _ase_tag="$1"
+  _ase_cwd="$2"
+  _ase_extra1="${3:-}"
+  ASE_SINCE="$_ase_since_file" agent-session-export "$_ase_tag" "$_ase_extra1" "" "$_ase_cwd" 2>/dev/null || \
+    ASE_SINCE="$_ase_since_file" agent-session-export "$_ase_tag" "" "$_ase_cwd" 2>/dev/null || true
+  rm -f "${_ase_since_file:-/nonexistent}" 2>/dev/null || true
+}
+
 claude-s() {
+  _ase_mark
   if ! _ase_user_handles_session "$@" && [ -d "$PWD/.session" ]; then
     _id=$(_ase_ensure_native claude "$PWD" || true)
     if [ -n "${_id:-}" ]; then
@@ -547,7 +585,7 @@ claude-s() {
       command claude --resume "$_id" "$@"
       _ec=$?
       trap '' INT
-      agent-session-export claude "" "" "$PWD" || true
+      _ase_export claude "$PWD"
       trap - INT
       return $_ec
     fi
@@ -564,7 +602,7 @@ claude-s() {
       command claude --continue "$@"
       _ec=$?
       trap '' INT
-      agent-session-export claude "" "" "$PWD" || true
+      _ase_export claude "$PWD"
       trap - INT
       return $_ec
     fi
@@ -572,12 +610,13 @@ claude-s() {
   command claude "$@"
   _ec=$?
   trap '' INT
-  agent-session-export claude "" "" "$PWD" || true
+  _ase_export claude "$PWD"
   trap - INT
   return $_ec
 }
 
 codex-s() {
+  _ase_mark
   if ! _ase_user_handles_session "$@" && [ -d "$PWD/.session" ]; then
     _id=$(_ase_ensure_native codex "$PWD" || true)
     if [ -n "${_id:-}" ]; then
@@ -589,7 +628,7 @@ codex-s() {
       fi
       _ec=$?
       trap '' INT
-      agent-session-export codex "" "$PWD" || true
+      _ase_export codex "$PWD"
       trap - INT
       return $_ec
     fi
@@ -597,12 +636,13 @@ codex-s() {
   command codex "$@"
   _ec=$?
   trap '' INT
-  agent-session-export codex "" "$PWD" || true
+  _ase_export codex "$PWD"
   trap - INT
   return $_ec
 }
 
 pi-s() {
+  _ase_mark
   if ! _ase_user_handles_session "$@" && [ -d "$PWD/.session" ]; then
     _id=$(_ase_ensure_native pi "$PWD" || true)
     if [ -n "${_id:-}" ]; then
@@ -617,7 +657,7 @@ pi-s() {
       fi
       _ec=$?
       trap '' INT
-      agent-session-export pi "" "$PWD" || true
+      _ase_export pi "$PWD"
       trap - INT
       return $_ec
     fi
@@ -625,7 +665,7 @@ pi-s() {
   command pi "$@"
   _ec=$?
   trap '' INT
-  agent-session-export pi "" "$PWD" || true
+  _ase_export pi "$PWD"
   trap - INT
   return $_ec
 }
