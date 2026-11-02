@@ -1,0 +1,16 @@
+README.md
+  h_df2ebcf7615d4f 22,26-28,31-41
+install.sh
+  h_df2ebcf7615d4f 501-502,504,506-514,588
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d157c281162ed0877c2a7e8b3db78f693fa34c92",
+  "prompts": {},
+  "humans": {
+    "h_df2ebcf7615d4f": {
+      "author": "njcx <njcx86@gmail.com>"
+    }
+  }
+}
