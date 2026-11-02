@@ -540,7 +540,7 @@ _ase_user_handles_session() {
 }
 
 claude-s() {
-  if ! _ase_user_handles_session "$@"; then
+  if ! _ase_user_handles_session "$@" && [ -d "$PWD/.session" ]; then
     _id=$(_ase_ensure_native claude "$PWD" || true)
     if [ -n "${_id:-}" ]; then
       echo "[claude-s] resume: $_id"
@@ -551,9 +551,14 @@ claude-s() {
       trap - INT
       return $_ec
     fi
-    # 迁移无可用会话；本机原生目录有历史才试 --continue，
-    # 否则直接新开（避免 "No conversation found" 报错后无法进入交互）
-    if command claude --help 2>&1 | grep -q -- '--continue' \
+    # 迁移无可用会话；仅当 .session 非空才试 --continue
+    # （.session 为空/不存在 = 本目录明确无会话 → 新开，不碰原生历史）
+    _has_any=""
+    for _f in "$PWD/.session"/latest-*.jsonl "$PWD/.session"/latest-*.json; do
+      [ -f "$_f" ] && _has_any=1 && break
+    done
+    if [ -n "$_has_any" ] \
+       && command claude --help 2>&1 | grep -q -- '--continue' \
        && [ -n "$(find "$HOME/.claude/projects" -name "*.jsonl" -type f 2>/dev/null | head -n 1)" ]; then
       echo "[claude-s] try --continue"
       command claude --continue "$@"
@@ -573,7 +578,7 @@ claude-s() {
 }
 
 codex-s() {
-  if ! _ase_user_handles_session "$@"; then
+  if ! _ase_user_handles_session "$@" && [ -d "$PWD/.session" ]; then
     _id=$(_ase_ensure_native codex "$PWD" || true)
     if [ -n "${_id:-}" ]; then
       echo "[codex-s] resume: $_id"
@@ -598,7 +603,7 @@ codex-s() {
 }
 
 pi-s() {
-  if ! _ase_user_handles_session "$@"; then
+  if ! _ase_user_handles_session "$@" && [ -d "$PWD/.session" ]; then
     _id=$(_ase_ensure_native pi "$PWD" || true)
     if [ -n "${_id:-}" ]; then
       echo "[pi-s] resume: $_id"
