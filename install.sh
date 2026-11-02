@@ -721,7 +721,6 @@ echo "    - 没有? 自动用 session-migrate 从其他 agent 迁移"
 echo "    - 退出后自动导出到 \$PWD/.session/"
 echo "  ASE_FRESH=1 codex-s       # 强制新开，不 resume、不迁移"
 echo
-echo "Check:  type codex-s"
-echo "        # 应看到: command codex \"\$@\"  且无多余反斜杠引号"
+echo "✔ 安装成功，祝使用愉快！"
 
 
