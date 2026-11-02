@@ -18,6 +18,30 @@ echo "==> OS: $(uname -s)  bash: ${BASH_VERSION:-unknown}"
 echo "==> prefix: $PREFIX"
 
 # ---------------------------------------------------------------------------
+# 前置) 强制依赖检查：jq / sqlite3 / python3，缺失即中止
+# ---------------------------------------------------------------------------
+_OS="$(uname -s)"
+_missing=""
+for _dep in jq sqlite3 python3; do
+  if ! command -v "$_dep" >/dev/null 2>&1; then
+    _missing="$_missing $_dep"
+  fi
+done
+if [ -n "$_missing" ]; then
+  echo "==> error: missing required dependencies:$_missing" >&2
+  echo "    请先安装后重试:" >&2
+  case "$_OS" in
+    Darwin)
+      echo "      brew install jq sqlite3 python3" >&2 ;;
+    *)
+      echo "      sudo apt install jq sqlite3 python3    # Debian/Ubuntu" >&2
+      echo "      sudo dnf install jq sqlite3 python3    # Fedora/RHEL" >&2 ;;
+  esac
+  exit 1
+fi
+echo "==> deps OK: jq / sqlite3 / python3"
+
+# ---------------------------------------------------------------------------
 # 0) 清理旧安装
 # ---------------------------------------------------------------------------
 echo "==> cleaning previous install..."
@@ -300,17 +324,23 @@ export_opencode() {
     fi
   fi
 
-  # 兜底：老版本文件布局
+  # 兜底：老版本文件布局。只认 storage 下的会话文件，
+  # 排除 service.json / 日志 / 缓存等状态文件
   _src=""
-  for _r in "$HOME/.local/share/opencode" "$HOME/.opencode" "$HOME/.config/opencode"; do
+  for _r in "$HOME/.local/share/opencode/storage" "$HOME/.opencode/storage" "$HOME/.config/opencode/storage"; do
     [ -d "$_r" ] || continue
     if [ -n "$_key" ]; then
       _src=$(find "$_r" -type f -name "*${_key}*" 2>/dev/null | head -n 1 || true)
     else
-      _src=$(latest_file "$_r" "*.jsonl" "*.json")
+      # 会话文件名含 ses_ 前缀或 UUID 形态；session_diff 的空 [] 也排除
+      _src=$(find "$_r" -type f \( -name "ses_*" -o -name "*-*-*-*-*" \) \( -name "*.json" -o -name "*.jsonl" \) 2>/dev/null | xargs ls -t 2>/dev/null | head -n 1 || true)
     fi
     [ -n "$_src" ] && break
   done
+  # 文件存在但内容为空数组（非会话）则放弃
+  if [ -n "$_src" ] && [ "$(wc -c < "$_src" 2>/dev/null || echo 0)" -le 10 ]; then
+    _src=""
+  fi
   [ -n "$_src" ] && copy_one "$_src" "$_dest_dir" "opencode" ""
 }
 
@@ -598,7 +628,7 @@ _ase_user_handles_session() {
 
 claude-s() {
   if ! _ase_user_handles_session "$@"; then
-    _id=$(_ase_ensure_native claude "$PWD" 2>/dev/null || true)
+    _id=$(_ase_ensure_native claude "$PWD" || true)
     if [ -n "${_id:-}" ]; then
       echo "[claude-s] resume: $_id"
       command claude --resume "$_id" "$@"
@@ -606,7 +636,10 @@ claude-s() {
       agent-session-export claude "" "" "$PWD" || true
       return $_ec
     fi
-    if command claude --help 2>&1 | grep -q -- '--continue'; then
+    # 迁移无可用会话；本机原生目录有历史才试 --continue，
+    # 否则直接新开（避免 "No conversation found" 报错后无法进入交互）
+    if command claude --help 2>&1 | grep -q -- '--continue' \
+       && [ -n "$(find "$HOME/.claude/projects" -name "*.jsonl" -type f 2>/dev/null | head -n 1)" ]; then
       echo "[claude-s] try --continue"
       command claude --continue "$@"
       _ec=$?
@@ -622,7 +655,7 @@ claude-s() {
 
 codex-s() {
   if ! _ase_user_handles_session "$@"; then
-    _id=$(_ase_ensure_native codex "$PWD" 2>/dev/null || true)
+    _id=$(_ase_ensure_native codex "$PWD" || true)
     if [ -n "${_id:-}" ]; then
       echo "[codex-s] resume: $_id"
       if command codex resume -h >/dev/null 2>&1 || command codex help resume >/dev/null 2>&1; then
@@ -643,7 +676,7 @@ codex-s() {
 
 pi-s() {
   if ! _ase_user_handles_session "$@"; then
-    _id=$(_ase_ensure_native pi "$PWD" 2>/dev/null || true)
+    _id=$(_ase_ensure_native pi "$PWD" || true)
     if [ -n "${_id:-}" ]; then
       echo "[pi-s] resume: $_id"
       # 先探测 pi 支持的 resume 参数，只启动一次（TUI 不可 || 链式重试）
@@ -667,7 +700,7 @@ pi-s() {
 
 opencode-s() {
   if ! _ase_user_handles_session "$@"; then
-    _id=$(_ase_ensure_native opencode "$PWD" 2>/dev/null || true)
+    _id=$(_ase_ensure_native opencode "$PWD" || true)
     if [ -n "${_id:-}" ]; then
       echo "[opencode-s] resume: $_id"
       # 先探测 opencode 支持的 resume 参数，只启动一次（TUI 不可 || 链式重试）
@@ -696,18 +729,6 @@ FUNCS
 
 append_rc "$HOME/.bashrc"
 append_rc "$HOME/.zshrc"
-
-# ---------------------------------------------------------------------------
-# 5) 依赖提示
-# ---------------------------------------------------------------------------
-if ! command -v jq >/dev/null 2>&1; then
-  echo "==> warning: jq not found (Claude SessionEnd / 解析 sessionId 需要)"
-  case "$(uname -s)" in
-    Darwin) echo "    brew install jq" ;;
-    Linux)  echo "    sudo apt install jq   # or: dnf/yum install jq" ;;
-    *)      echo "    please install jq" ;;
-  esac
-fi
 
 echo
 echo "Install finished."
